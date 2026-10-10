@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flow2API Token Updater</title>
+    <title>Flow2API — обновление Cookie</title>
     <style>
         * {
             margin: 0;
@@ -150,40 +150,40 @@
     </style>
 </head>
 <body>
-    <h1>🔄 Flow2API Token Updater</h1>
-    <div class="sync-state" id="lastSync">正在读取同步状态...</div>
+    <h1>🔄 Flow2API — обновление Cookie</h1>
+    <div class="sync-state" id="lastSync">Загрузка состояния синхронизации...</div>
 
     <div class="form-group">
-        <label for="apiUrl">连接接口</label>
+        <label for="apiUrl">Адрес подключения</label>
         <input type="text" id="apiUrl" placeholder="http://127.0.0.1:8000/api/plugin/update-token">
-        <div class="hint">从Flow2API管理后台的"插件连接配置"中复制</div>
+        <div class="hint">Скопируйте из раздела «Подключение расширения» в админке Flow2API</div>
     </div>
 
     <div class="form-group">
-        <label for="connectionToken">连接Token</label>
-        <input type="password" id="connectionToken" placeholder="输入连接Token" autocomplete="off">
-        <div class="hint">仅保存在当前浏览器，不会通过Chrome同步</div>
+        <label for="connectionToken">Токен подключения</label>
+        <input type="password" id="connectionToken" placeholder="Введите токен подключения" autocomplete="off">
+        <div class="hint">Хранится только в этом браузере, не синхронизируется через Chrome</div>
     </div>
 
     <div class="form-group">
-        <label for="loginAccount">Google账号</label>
+        <label for="loginAccount">Аккаунт Google</label>
         <input type="email" id="loginAccount" placeholder="name@example.com" required>
-        <div class="hint">用于稳定更新同一账号，避免Cookie变化后被识别为新账号</div>
+        <div class="hint">Укажите почту аккаунта, для которого нужно обновлять Cookie</div>
     </div>
 
     <div class="form-group">
-        <label for="refreshInterval">刷新间隔（分钟）</label>
+        <label for="refreshInterval">Интервал обновления (мин.)</label>
         <input type="number" id="refreshInterval" value="60" min="1" max="1440">
-        <div class="hint">建议设置为60分钟（1小时）</div>
+        <div class="hint">Рекомендуется 60 минут (1 час)</div>
     </div>
 
     <div class="button-group">
-        <button class="btn-primary" id="saveBtn">保存配置</button>
-        <button class="btn-secondary" id="testBtn">立即测试</button>
+        <button class="btn-primary" id="saveBtn">Сохранить</button>
+        <button class="btn-secondary" id="testBtn">Проверить сейчас</button>
     </div>
 
     <div class="button-group">
-        <button class="btn-secondary" id="logsBtn" style="width: 100%;">📋 查看日志</button>
+        <button class="btn-secondary" id="logsBtn" style="width: 100%;">📋 Журнал событий</button>
     </div>
 
     <div class="status" id="status"></div>
@@ -191,11 +191,11 @@
     <div class="divider"></div>
 
     <div class="info-section">
-        <strong>📌 使用说明：</strong><br>
-        1. 在Flow2API管理后台获取连接接口和Token<br>
-        2. 填写配置并保存<br>
-        3. 填写当前Flow账号邮箱，确保持续更新同一账号<br>
-        4. 插件将定时同步新版Flow登录态到Flow2API系统
+        <strong>📌 Как пользоваться：</strong><br>
+        1. Скопируйте адрес и токен подключения из панели Flow2API<br>
+        2. Заполните поля и сохраните настройки<br>
+        3. Укажите почту аккаунта Google, в котором вы вошли в Flow<br>
+        4. Расширение будет автоматически отправлять обновлённые Cookie в Flow2API
     </div>
 
     <script src="popup.js"></script>

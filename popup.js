@@ -1,4 +1,4 @@
-// popup.js - Chrome扩展配置界面脚本
+// popup.js — интерфейс настроек расширения Chrome
 
 let statusTimer = null;
 let approvedInsecureOrigin = '';
@@ -20,13 +20,13 @@ function normalizeApiUrl(value) {
     try {
         url = new URL(String(value || '').trim());
     } catch (error) {
-        throw new Error('连接接口格式无效');
+        throw new Error('Неверный формат адреса подключения');
     }
     if (!['http:', 'https:'].includes(url.protocol)) {
-        throw new Error('连接接口仅支持 HTTP 或 HTTPS');
+        throw new Error('Адрес подключения должен начинаться с HTTP или HTTPS');
     }
     if (url.username || url.password) {
-        throw new Error('连接接口中不能包含用户名或密码');
+        throw new Error('Адрес подключения не должен содержать логин или пароль');
     }
     url.hash = '';
     url.search = '';
@@ -55,13 +55,13 @@ function getFormConfig() {
     );
 
     if (!connectionToken) {
-        throw new Error('请输入连接Token');
+        throw new Error('Введите токен подключения');
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginAccount)) {
-        throw new Error('请输入有效的Google账号邮箱');
+        throw new Error('Укажите действительный адрес электронной почты аккаунта Google');
     }
     if (!Number.isInteger(refreshInterval) || refreshInterval < 1 || refreshInterval > 1440) {
-        throw new Error('刷新间隔必须在1-1440分钟之间');
+        throw new Error('Интервал должен быть от 1 до 1440 минут');
     }
 
     return { apiUrl, connectionToken, loginAccount, refreshInterval };
@@ -75,13 +75,13 @@ function setBusy(busy) {
 function renderLastSync(lastSync) {
     const state = document.getElementById('lastSync');
     if (!lastSync || !lastSync.timestamp) {
-        state.textContent = '尚未执行同步';
+        state.textContent = 'Синхронизация ещё не выполнялась';
         state.className = 'sync-state';
         return;
     }
     const date = new Date(lastSync.timestamp);
-    const time = Number.isNaN(date.getTime()) ? '时间未知' : date.toLocaleString('zh-CN');
-    state.textContent = `${lastSync.success ? '最近同步成功' : '最近同步失败'} · ${time}\n${lastSync.message || ''}`.trim();
+    const time = Number.isNaN(date.getTime()) ? 'Время неизвестно' : date.toLocaleString('ru-RU');
+    state.textContent = `${lastSync.success ? 'Последняя синхронизация успешна' : 'Последняя синхронизация не удалась'} · ${time}\n${lastSync.message || ''}`.trim();
     state.className = `sync-state ${lastSync.success ? 'success' : 'error'}`;
 }
 
@@ -90,7 +90,7 @@ async function requestApiPermission(apiUrl) {
     const originPattern = `${url.protocol}//${url.hostname}/*`;
     const granted = await chrome.permissions.request({ origins: [originPattern] });
     if (!granted) {
-        throw new Error('需要授权访问Flow2API服务地址');
+        throw new Error('Разрешите расширению доступ к адресу сервера Flow2API');
     }
 }
 
@@ -99,10 +99,10 @@ async function saveCurrentConfig() {
     const insecureOrigin = insecureRemoteOrigin(config.apiUrl);
     if (insecureOrigin && approvedInsecureOrigin !== insecureOrigin) {
         const approved = confirm(
-            '该地址使用非本机 HTTP 连接，Google 登录 Cookie 和连接 Token 将以明文传输。建议先为 Flow2API 配置 HTTPS。\n\n确定仍要使用该地址吗？'
+            'Вы используете удалённый сервер по HTTP. Cookie Google и токен подключения передаются без шифрования. Рекомендуется настроить HTTPS.\n\nВсё равно продолжить?'
         );
         if (!approved) {
-            throw new Error('已取消保存，请改用HTTPS地址');
+            throw new Error('Сохранение отменено. Укажите адрес HTTPS');
         }
     }
     approvedInsecureOrigin = insecureOrigin;
@@ -110,7 +110,7 @@ async function saveCurrentConfig() {
     await requestApiPermission(config.apiUrl);
     const response = await sendMessage({ action: 'saveConfig', config });
     if (!response || !response.success) {
-        throw new Error(response && response.error || '配置保存失败');
+        throw new Error(response && response.error || 'Не удалось сохранить настройки');
     }
     document.getElementById('apiUrl').value = response.config.apiUrl;
     document.getElementById('loginAccount').value = response.config.loginAccount;
@@ -120,7 +120,7 @@ async function saveCurrentConfig() {
 async function loadConfig() {
     const response = await sendMessage({ action: 'getConfig' });
     if (!response || !response.success) {
-        throw new Error(response && response.error || '配置读取失败');
+        throw new Error(response && response.error || 'Не удалось загрузить настройки');
     }
     const config = response.config || {};
     document.getElementById('apiUrl').value = config.apiUrl || '';
@@ -135,15 +135,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
         await loadConfig();
     } catch (error) {
-        showStatus(`配置读取失败：${error.message}`, 'error', false);
+        showStatus(`Не удалось загрузить настройки：${error.message}`, 'error', false);
     }
 
     document.getElementById('saveBtn').addEventListener('click', async () => {
         setBusy(true);
-        showStatus('正在保存配置...', 'info', false);
+        showStatus('Сохраняем настройки...', 'info', false);
         try {
             await saveCurrentConfig();
-            showStatus('配置保存成功', 'success');
+            showStatus('Настройки сохранены', 'success');
         } catch (error) {
             showStatus(error.message, 'error', false);
         } finally {
@@ -153,22 +153,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.getElementById('testBtn').addEventListener('click', async () => {
         setBusy(true);
-        showStatus('正在保存配置并同步登录态...', 'info', false);
+        showStatus('Сохраняем настройки и отправляем Cookie...', 'info', false);
         try {
             await saveCurrentConfig();
             const response = await sendMessage({ action: 'testNow' });
             if (!response || !response.success) {
-                throw new Error(response && response.error || '同步失败');
+                throw new Error(response && response.error || 'Синхронизация не удалась');
             }
-            const actionText = response.action === 'added' ? '已添加账号' : '已更新账号';
-            showStatus(`同步成功：${actionText}\n${response.message || ''}`.trim(), 'success', false);
+            const actionText = response.action === 'added' ? 'Аккаунт добавлен' : 'Аккаунт обновлён';
+            showStatus(`Синхронизация успешна：${actionText}\n${response.message || ''}`.trim(), 'success', false);
             renderLastSync({
                 timestamp: new Date().toISOString(),
                 success: true,
                 message: response.message || actionText
             });
         } catch (error) {
-            showStatus(`同步失败：${error.message}`, 'error', false);
+            showStatus(`Ошибка синхронизации：${error.message}`, 'error', false);
             renderLastSync({
                 timestamp: new Date().toISOString(),
                 success: false,

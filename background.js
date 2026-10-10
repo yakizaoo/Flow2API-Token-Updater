@@ -1,6 +1,6 @@
-// background.js - Chrome扩展后台脚本
+// background.js — фоновый скрипт расширения Chrome
 
-// 定时器名称
+// Имя периодического задания
 const ALARM_NAME = 'tokenRefresh';
 const DEFAULT_REFRESH_INTERVAL = 60;
 const MIN_REFRESH_INTERVAL = 1;
@@ -9,21 +9,30 @@ const REQUEST_TIMEOUT_MS = 30000;
 const RETRY_DELAYS_MS = [1500, 4000];
 
 const FLOW_URL = 'https://flow.google.com/projects';
-const MODERN_FLOW_COOKIE_NAMES = new Set(['OSID', '__Secure-OSID']);
-const GOOGLE_ACCOUNT_COOKIE_NAMES = new Set([
-    'SID',
-    'HSID',
-    'SSID',
-    'APISID',
-    'SAPISID',
-    '__Secure-1PSID',
-    '__Secure-3PSID'
-]);
-
 let activeSyncPromise = null;
+// Lives only while an extension-owned Flow tab is loading; never persisted or logged.
+let activeRequestCookieCapture = null;
+
+// Read the exact Cookie request header, just like DevTools > Network > Request Headers.
+// onSendHeaders exposes the final headers; extraHeaders is required for Cookie in Chrome.
+// Only the main document request from OUR temporary tab to flow.google.com is observed.
+chrome.webRequest.onSendHeaders.addListener((details) => {
+    if (!activeRequestCookieCapture || details.tabId !== activeRequestCookieCapture.tabId) {
+        return;
+    }
+    const cookieHeader = (details.requestHeaders || []).find(
+        header => String(header.name || '').toLowerCase() === 'cookie'
+    );
+    if (cookieHeader && typeof cookieHeader.value === 'string' && cookieHeader.value.trim()) {
+        activeRequestCookieCapture.header = cookieHeader.value;
+    }
+}, {
+    urls: ['https://flow.google.com/*'],
+    types: ['main_frame']
+}, ['requestHeaders', 'extraHeaders']);
 let logWriteQueue = Promise.resolve();
 
-// 日志系统
+// Журнал событий
 const Logger = {
     log(level, message, details = null) {
         const timestamp = new Date().toISOString();
@@ -112,19 +121,19 @@ async function initializeExtension() {
 
 chrome.runtime.onInstalled.addListener(() => {
     initializeExtension().then(() => {
-        return Logger.info('扩展已初始化');
+        return Logger.info('Расширение инициализировано');
     }).catch((error) => {
-        Logger.error('扩展初始化失败', { error: error.message });
+        Logger.error('Не удалось инициализировать расширение', { error: error.message });
     });
 });
 
 chrome.runtime.onStartup.addListener(() => {
     initializeExtension().catch((error) => {
-        Logger.error('扩展启动失败', { error: error.message });
+        Logger.error('Ошибка запуска расширения', { error: error.message });
     });
 });
 
-// 监听来自popup的消息
+// Сообщения от окна настроек
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'getConfig') {
         Promise.all([
@@ -139,7 +148,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === 'saveConfig') {
         saveConfig(request.config).then(async (config) => {
             await setupAlarm();
-            await Logger.info('配置已保存，定时任务已更新', {
+            await Logger.info('Настройки сохранены, расписание обновлено', {
                 apiUrl: config.apiUrl,
                 loginAccount: config.loginAccount,
                 refreshInterval: config.refreshInterval
@@ -155,7 +164,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }).catch((error) => {
             sendResponse({ success: false, error: error.message });
         });
-        return true; // 保持消息通道开启
+        return true; // Оставляем канал сообщений открытым
     } else if (request.action === 'getLogs') {
         Logger.getLogs().then((logs) => {
             sendResponse({ success: true, logs });
@@ -173,16 +182,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 });
 
-// 监听定时器触发
+// Запуск по расписанию
 chrome.alarms.onAlarm.addListener(async (alarm) => {
     if (alarm.name === ALARM_NAME) {
-        await Logger.info('定时同步任务已触发');
+        await Logger.info('Запущена синхронизация по расписанию');
         const result = await runTokenSync();
 
-        // 发送通知
+        // Уведомления браузера
         if (result.success) {
-            const title = result.action === 'updated' ? '✅ Token已更新' : '✅ Token已添加';
-            const message = result.displayMessage || result.message || 'Token已成功同步到Flow2API';
+            const title = result.action === 'updated' ? '✅ Токен обновлён' : '✅ Токен добавлен';
+            const message = result.displayMessage || result.message || 'Токен успешно синхронизирован с Flow2API';
 
             chrome.notifications.create({
                 type: 'basic',
@@ -194,26 +203,26 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
             chrome.notifications.create({
                 type: 'basic',
                 iconUrl: 'icon48.png',
-                title: '❌ Token同步失败',
-                message: String(result.error || '未知错误').slice(0, 240)
+                title: '❌ Не удалось синхронизировать токен',
+                message: String(result.error || 'Неизвестная ошибка').slice(0, 240)
             });
         }
     }
 });
 
-// 设置定时器
+// Настройка расписания
 async function setupAlarm() {
     await chrome.alarms.clear(ALARM_NAME);
     const config = await getConfig();
     if (!config.apiUrl || !config.connectionToken || !config.loginAccount) {
-        await Logger.info('配置尚未完成，暂未启动定时同步');
+        await Logger.info('Настройки заполнены не полностью: синхронизация по расписанию выключена');
         return;
     }
     let validatedConfig;
     try {
         validatedConfig = validateConfig(config);
     } catch (error) {
-        await Logger.error('配置需要重新确认，暂未启动定时同步', {
+        await Logger.error('Проверьте настройки: синхронизация по расписанию выключена', {
             error: error.message
         });
         return;
@@ -223,7 +232,7 @@ async function setupAlarm() {
         delayInMinutes: intervalMinutes,
         periodInMinutes: intervalMinutes
     });
-    await Logger.info(`定时同步间隔已设置为 ${intervalMinutes} 分钟`);
+    await Logger.info(`Интервал синхронизации: ${intervalMinutes} мин.`);
 }
 
 function normalizeRefreshInterval(value) {
@@ -239,13 +248,13 @@ function normalizeApiUrl(value) {
     try {
         url = new URL(String(value || '').trim());
     } catch (error) {
-        throw new Error('连接接口格式无效');
+        throw new Error('Неверный формат адреса подключения');
     }
     if (!['http:', 'https:'].includes(url.protocol)) {
-        throw new Error('连接接口仅支持 HTTP 或 HTTPS');
+        throw new Error('Адрес подключения должен начинаться с HTTP или HTTPS');
     }
     if (url.username || url.password) {
-        throw new Error('连接接口中不能包含用户名或密码');
+        throw new Error('Адрес подключения не должен содержать логин или пароль');
     }
     url.hash = '';
     url.search = '';
@@ -267,7 +276,7 @@ function insecureRemoteOrigin(value) {
 function normalizeEmail(value) {
     const email = String(value || '').trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
-        throw new Error('请输入有效的Google账号邮箱');
+        throw new Error('Укажите действительный адрес электронной почты аккаунта Google');
     }
     return email;
 }
@@ -275,7 +284,7 @@ function normalizeEmail(value) {
 function validateConfig(config) {
     const connectionToken = String(config && config.connectionToken || '').trim();
     if (!connectionToken || connectionToken.length > 4096) {
-        throw new Error('连接Token无效');
+        throw new Error('Неверный токен подключения');
     }
     const refreshInterval = Number.parseInt(config && config.refreshInterval, 10);
     if (
@@ -283,13 +292,13 @@ function validateConfig(config) {
         || refreshInterval < MIN_REFRESH_INTERVAL
         || refreshInterval > MAX_REFRESH_INTERVAL
     ) {
-        throw new Error(`刷新间隔必须在 ${MIN_REFRESH_INTERVAL}-${MAX_REFRESH_INTERVAL} 分钟之间`);
+        throw new Error(`Интервал должен быть от ${MIN_REFRESH_INTERVAL} до ${MAX_REFRESH_INTERVAL} минут`);
     }
     const apiUrl = normalizeApiUrl(config && config.apiUrl);
     const requiredApprovalOrigin = insecureRemoteOrigin(apiUrl);
     const insecureHttpOrigin = String(config && config.insecureHttpOrigin || '').trim();
     if (requiredApprovalOrigin && insecureHttpOrigin !== requiredApprovalOrigin) {
-        throw new Error('非本机HTTP地址需要在扩展设置中重新确认');
+        throw new Error('Подтвердите небезопасный HTTP-адрес в настройках расширения');
     }
     return {
         apiUrl,
@@ -379,58 +388,11 @@ function waitForTabReady(tabId, timeoutMs = 15000) {
     });
 }
 
-function normalizeCookieDomain(domain) {
-    return String(domain || '').replace(/^\./, '').toLowerCase();
-}
-
-function cookieKey(cookie) {
-    const partitionSite = cookie.partitionKey && cookie.partitionKey.topLevelSite
-        ? cookie.partitionKey.topLevelSite
-        : '';
-    return [cookie.name, cookie.domain, cookie.path, cookie.storeId, partitionSite].join('\u0000');
-}
-
-function deduplicateCookies(cookies) {
-    return Array.from(new Map(cookies.map(cookie => [cookieKey(cookie), cookie])).values());
-}
-
-function isGoogleAccountCookieDomain(domain) {
-    const normalizedDomain = normalizeCookieDomain(domain);
-    return normalizedDomain === 'google.com';
-}
-
-function serializeCookieStorage(cookies) {
-    const payload = cookies
-        .filter(cookie => cookie && cookie.name && cookie.value)
-        .map(cookie => {
-            const item = {
-                name: cookie.name,
-                value: cookie.value,
-                domain: cookie.domain || '',
-                path: cookie.path || '/',
-                secure: Boolean(cookie.secure),
-                httpOnly: Boolean(cookie.httpOnly),
-                hostOnly: Boolean(cookie.hostOnly),
-                session: Boolean(cookie.session)
-            };
-            if (Number.isFinite(cookie.expirationDate)) {
-                item.expirationDate = cookie.expirationDate;
-            }
-            if (cookie.sameSite) {
-                item.sameSite = cookie.sameSite;
-            }
-            if (cookie.partitionKey && typeof cookie.partitionKey === 'object') {
-                item.partitionKey = cookie.partitionKey;
-            }
-            return item;
-        });
-    return JSON.stringify(payload);
-}
-
-async function collectRelevantCookies() {
-    const cookies = await chrome.cookies.getAll({ url: FLOW_URL });
-    await Logger.info(`从Flow页面请求范围找到 ${cookies.length} 个Cookie`);
-    return deduplicateCookies(cookies);
+function cookieNamesFromRequestHeader(header) {
+    return String(header || '')
+        .split(';')
+        .map(pair => pair.trim().split('=', 1)[0])
+        .filter(Boolean);
 }
 
 async function closeTemporaryTab(tab) {
@@ -440,9 +402,9 @@ async function closeTemporaryTab(tab) {
 
     try {
         await chrome.tabs.remove(tab.id);
-        await Logger.info('标签页已关闭');
+        await Logger.info('Временная вкладка закрыта');
     } catch (error) {
-        await Logger.info('临时标签页已不存在');
+        await Logger.info('Временная вкладка уже закрыта');
     }
 }
 
@@ -459,10 +421,20 @@ function parseServerErrorMessage(responseText) {
             return message.slice(0, 300);
         }
     } catch (error) {
-        // 非JSON响应直接使用截断后的文本
+        // Если ответ не JSON, показываем сокращённый текст
     }
 
     return raw.slice(0, 300);
+}
+
+// Переводим только известные сообщения сервера для интерфейса. Незнакомые оставляем как есть.
+function localizeServerMessage(value) {
+    const text = String(value || '').trim();
+    let match = /^Token added for (.+)$/i.exec(text);
+    if (match) return `Аккаунт добавлен: ${match[1]}`;
+    match = /^Token updated for (.+)$/i.exec(text);
+    if (match) return `Аккаунт обновлён: ${match[1]}`;
+    return text;
 }
 
 function isRetryableStatus(status) {
@@ -505,14 +477,14 @@ async function sendTokenPayload(config, payload) {
                 try {
                     result = JSON.parse(responseText);
                 } catch (error) {
-                    throw requestError('服务器返回了无效的JSON响应');
+                    throw requestError('Сервер вернул некорректный JSON');
                 }
                 if (!result || typeof result !== 'object') {
-                    throw requestError('服务器返回格式无效');
+                    throw requestError('Сервер вернул ответ неверного формата');
                 }
                 if (result.success === false) {
                     throw requestError(
-                        String(result.error || result.message || '服务器拒绝了同步请求')
+                        String(result.error || result.message || 'Сервер отклонил запрос синхронизации')
                     );
                 }
                 return result;
@@ -522,14 +494,14 @@ async function sendTokenPayload(config, payload) {
             if (!isRetryableStatus(response.status) || attempt >= RETRY_DELAYS_MS.length) {
                 throw requestError(
                     serverError
-                        ? `服务器错误 ${response.status}: ${serverError}`
-                        : `服务器错误: ${response.status}`
+                        ? `Ошибка сервера ${response.status}: ${serverError}`
+                        : `Ошибка сервера: ${response.status}`
                 );
             }
             lastError = new Error(serverError || `HTTP ${response.status}`);
         } catch (error) {
             lastError = error && error.name === 'AbortError'
-                ? new Error('连接Flow2API服务超时')
+                ? new Error('Истекло время ожидания ответа от Flow2API')
                 : error;
             const retryableNetworkError = error && error.retryable !== false && (
                 error.name === 'AbortError'
@@ -542,14 +514,14 @@ async function sendTokenPayload(config, payload) {
         }
 
         const delay = RETRY_DELAYS_MS[attempt];
-        await Logger.info(`推送失败，将在 ${delay} 毫秒后重试`, {
+        await Logger.info(`Ошибка отправки. Повтор через ${delay} мс`, {
             attempt: attempt + 1,
             error: lastError ? lastError.message : 'unknown'
         });
         await sleep(delay);
     }
 
-    throw lastError || new Error('Token推送失败');
+    throw lastError || new Error('Не удалось отправить токен');
 }
 
 function runTokenSync() {
@@ -561,7 +533,7 @@ function runTokenSync() {
             try {
                 await recordSyncResult(result);
             } catch (error) {
-                await Logger.error('同步状态保存失败', { error: error.message });
+                await Logger.error('Не удалось сохранить состояние синхронизации', { error: error.message });
             }
             return result;
         })
@@ -579,8 +551,8 @@ async function recordSyncResult(result) {
         action: String(result && result.action || ''),
         message: sanitizeLogDetails(String(
             success
-                ? result && result.message || '同步成功'
-                : result && result.error || '同步失败'
+                ? result && result.message || 'Синхронизация успешна'
+                : result && result.error || 'Синхронизация не удалась'
         )).slice(0, 300)
     };
     await chrome.storage.local.set({ lastSync });
@@ -599,33 +571,33 @@ async function updateSyncBadge(lastSync) {
     await chrome.action.setBadgeBackgroundColor({ color: success ? '#137333' : '#c5221f' });
     await chrome.action.setBadgeText({ text: success ? '✓' : '!' });
     await chrome.action.setTitle({
-        title: success ? 'Flow2API：最近同步成功' : 'Flow2API：最近同步失败'
+        title: success ? 'Flow2API: последняя синхронизация успешна' : 'Flow2API: последняя синхронизация не удалась'
     });
 }
 
-// 提取cookie并发送到服务器
+// Получение Cookie и отправка на сервер
 async function extractAndSendToken() {
     let tab = null;
 
     try {
-        await Logger.info('开始提取Token...');
+        await Logger.info('Начинаем синхронизацию...');
 
         const config = validateConfig(await getConfig());
 
-        await Logger.info('配置已加载', { apiUrl: config.apiUrl });
+        await Logger.info('Настройки загружены', { apiUrl: config.apiUrl });
 
-        // 1. 打开新版Flow页面（在后台），让浏览器刷新当前登录态
-        await Logger.info('正在打开Google Flow页面...');
-        tab = await chrome.tabs.create({
-            url: FLOW_URL,
-            active: false
-        });
+        // 1. Открываем страницу Flow в фоне для обновления текущей сессии
+        await Logger.info('Открываем Google Flow...');
+        // Create a blank tab first to avoid missing the initial main_frame request.
+        tab = await chrome.tabs.create({ url: 'about:blank', active: false });
+        activeRequestCookieCapture = { tabId: tab.id, header: '' };
+        await chrome.tabs.update(tab.id, { url: FLOW_URL });
 
-        await Logger.info('页面已创建，等待加载...', { tabId: tab.id });
+        await Logger.info('Вкладка создана, ожидаем загрузку...', { tabId: tab.id });
 
         await waitForTabReady(tab.id);
 
-        await Logger.info('页面加载完成，等待JavaScript执行...');
+        await Logger.info('Страница загружена, ожидаем выполнения JavaScript...');
 
         await sleep(5000);
 
@@ -641,77 +613,48 @@ async function extractAndSendToken() {
             tab = null;
             return {
                 success: false,
-                error: 'Google Flow未保持登录状态。请在当前浏览器配置中重新登录Flow后再试。'
+                error: 'В этом профиле Chrome нет активного входа в Google Flow. Войдите в аккаунт и повторите попытку.'
             };
         }
 
-        await Logger.info('开始提取Cookies...');
+        await Logger.info('Получаем Cookie из запроса...');
 
-        // 2. 提取新版Flow会话与Google账号Cookie
-        const uniqueCookies = await collectRelevantCookies();
+        // 2. Берём Cookie из исходящего запроса Chrome к flow.google.com без изменений.
+        // Never serialize the cookie store to JSON or re-order/remove cookies.
+        const googleCookies = activeRequestCookieCapture?.header || '';
+        const cookieNames = cookieNamesFromRequestHeader(googleCookies);
+        const hasFlowSession = cookieNames.some(name => name === 'OSID' || name === '__Secure-OSID');
+        const hasGoogleSession = cookieNames.some(name => [
+            'SID', 'HSID', 'SSID', 'APISID', 'SAPISID', '__Secure-1PSID', '__Secure-3PSID'
+        ].includes(name));
 
-        await Logger.info(`总共找到 ${uniqueCookies.length} 个唯一Cookie`);
-
-        const modernFlowCookie = uniqueCookies.find(cookie => (
-            MODERN_FLOW_COOKIE_NAMES.has(cookie.name)
-            && normalizeCookieDomain(cookie.domain) === 'flow.google.com'
-            && cookie.value
-        ));
-        const googleAccountCookie = uniqueCookies.find(cookie => (
-            GOOGLE_ACCOUNT_COOKIE_NAMES.has(cookie.name)
-            && isGoogleAccountCookieDomain(cookie.domain)
-            && cookie.value
-        ));
-        const googleCookies = googleAccountCookie ? serializeCookieStorage(uniqueCookies) : '';
-
-        if (modernFlowCookie) {
-            await Logger.success('找到新版Flow Cookie', {
-                name: modernFlowCookie.name,
-                domain: modernFlowCookie.domain,
-                path: modernFlowCookie.path,
-                length: modernFlowCookie.value.length
-            });
-        }
-        // 关闭标签页
+        // The temporary tab is no longer needed after its request header is captured.
         await closeTemporaryTab(tab);
         tab = null;
 
-        if (!modernFlowCookie) {
-            await Logger.error('未找到Flow登录Cookie', {
-                foundCookies: uniqueCookies.map(c => ({
-                    name: c.name,
-                    domain: c.domain
-                }))
-            });
-
-            return {
-                success: false,
-                error: '未找到Flow登录Cookie。请先登录Google Flow，并确认首页或项目页可以正常打开。'
-            };
-        }
-
-        if (!googleAccountCookie) {
-            await Logger.error('未找到Google账号Cookie', {
-                requiredNames: Array.from(GOOGLE_ACCOUNT_COOKIE_NAMES)
-            });
-            return {
-                success: false,
-                error: '已找到新版Flow会话，但未读取到Google账号Cookie。请重新登录Google后再试。'
-            };
-        }
-
         if (!googleCookies) {
-            await Logger.error('Cookie序列化失败');
-            return { success: false, error: '未生成可同步的Cookie数据。' };
+            return {
+                success: false,
+                error: 'Chrome не передал заголовок Cookie для flow.google.com. Войдите в Flow и убедитесь, что в Network у запроса страницы есть Cookie.'
+            };
+        }
+        if (!hasFlowSession || !hasGoogleSession) {
+            await Logger.info('В запросе отсутствуют необходимые Cookie авторизации', {
+                hasFlowSession, hasGoogleSession, cookieCount: cookieNames.length
+            });
+            return {
+                success: false,
+                error: 'В запросе Flow не хватает Cookie сессии Google (OSID/SID). Войдите в Google Flow заново в этом профиле Chrome.'
+            };
         }
 
-        await Logger.info('Flow Cookie提取成功', {
-            mode: 'structured-cookie',
-            cookieCount: uniqueCookies.length
+        await Logger.info('Cookie Google Flow получены', {
+            mode: 'network-request-cookie-header',
+            cookieCount: cookieNames.length
         });
 
-        // 3. 发送到服务器
-        await Logger.info('正在发送到服务器...');
+        // 3. Отправка на сервер
+        await Logger.info('Отправляем данные на сервер...');
 
         const payload = {
             google_cookies: googleCookies,
@@ -721,35 +664,38 @@ async function extractAndSendToken() {
 
         const result = await sendTokenPayload(config, payload);
 
-        // 根据action显示不同的日志信息
+        // Разные сообщения для добавленного и обновлённого аккаунта
         if (result.action === 'updated') {
-            await Logger.success('✅ Token已更新到上游', {
-                action: '更新现有Token',
-                message: result.message
+            await Logger.success('✅ Токен аккаунта обновлён на сервере', {
+                action: 'Обновление существующего токена',
+                message: localizeServerMessage(result.message)
             });
         } else if (result.action === 'added') {
-            await Logger.success('✅ Token已添加到上游', {
-                action: '添加新Token',
-                message: result.message
+            await Logger.success('✅ Токен аккаунта добавлен на сервер', {
+                action: 'Добавление нового токена',
+                message: localizeServerMessage(result.message)
             });
         } else {
-            await Logger.success('✅ Token已同步到上游', result);
+            await Logger.success('✅ Токен аккаунта синхронизирован', result);
         }
 
         return {
             success: true,
-            message: result.message || 'Token更新成功',
+            message: localizeServerMessage(result.message) || 'Токен успешно обновлён',
             action: result.action,
             displayMessage: result.action === 'updated'
-                ? `✅ 成功更新到上游\n${result.message || 'Token更新成功'}`
-                : `✅ 成功添加到上游\n${result.message || 'Token同步成功'}`
+                ? `✅ Данные аккаунта обновлены на сервере\n${localizeServerMessage(result.message) || 'Токен успешно обновлён'}`
+                : `✅ Аккаунт добавлен на сервер\n${localizeServerMessage(result.message) || 'Токен успешно синхронизирован'}`
         };
 
     } catch (error) {
-        await Logger.error('同步过程失败', { error: error.message });
+        await Logger.error('Ошибка синхронизации', { error: error.message });
 
         await closeTemporaryTab(tab);
 
         return { success: false, error: error.message };
+    } finally {
+        // Never retain auth cookies in the service worker after this sync.
+        activeRequestCookieCapture = null;
     }
 }
