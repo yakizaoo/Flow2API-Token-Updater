@@ -1,43 +1,129 @@
-# 使用说明
+# Flow2API Token Updater RU
 
-需要配合 [Flow2api](https://github.com/TheSmallHanCat/flow2api) 服务使用。
+**Русский** | [English](#english)
 
-## 一、 安装步骤
+расширение для автоматического обновления Google Cookies в [Flow2API](https://github.com/TheSmallHanCat/flow2api).
 
-1.  **打开扩展程序页面**
-    在 Chrome 浏览器地址栏输入并访问：
-    `chrome://extensions/`
+оригинальное расширение почему-то собирало куки из хранилища браузера и отправляло их в JSON. у меня такой способ не работал, сервер возвращал ошибку `Flow frontend bootstrap XSRF token is unavailable`.
 
-2.  **开启开发者模式**
-    点击页面右上角的 **“开发者模式”** 开关。
-    ![开启开发者模式](image.png)
+при этом обычная строка `Cookie`, скопированная через F12 → Network, прекрасно работала. поэтому переделал получение куков. теперь расширение перехватывает реальный заголовок `Cookie` из запроса к `flow.google.com` и отправляет его на сервер в том же формате.
 
-3.  **载入插件**
-    将解压后的插件目录直接 **拖拽** 到浏览器页面中，或点击“加载已解压的扩展程序”选择该目录。
-    ![安装插件](image-1.png)
+за основу взято [Flow2API-Token-Updater](https://github.com/TheSmallHanCat/Flow2API-Token-Updater). интерфейс полностью переведён на русский.
 
-## 二、 配置指南
+### функционал
 
-1.  **设置接口与 Token**
-    点击插件图标，在弹出窗口中配置 **连接接口 (API URL)**、**连接 Token** 和当前 **Google 账号**。连接 Token 仅保存在本机浏览器中，不会通过 Chrome 同步。刷新时间默认 60 分钟。
-    ![配置界面](image-2.png)
+- автоматическое обновление Google Cookies через API Flow2API
+- получение Cookie напрямую из сетевых запросов браузера, как в F12 → Network
+- привязка к Google-аккаунту по почте
+- автоматическая синхронизация каждые 60 минут, интервал можно изменить
+- ручная синхронизация для проверки
+- журнал событий с ошибками и результатами
+- повторные попытки при временных сетевых ошибках
+- русский интерфейс
 
-2.  **获取配置信息**
-    如果您不知道如何填写，请登录 **Flow2api 后台** 查看相关的接口地址和访问密钥。
-    ![后台查看配置](image-3.png)
+### установка
 
-3.  **多账号浏览器**
-    在插件中填写当前使用的 Flow 账号邮箱，确保 Cookie 更新后仍能准确更新同一个账号。同步前请确认当前浏览器配置中的 `https://flow.google.com/projects` 可以正常打开。插件会按浏览器访问 Flow 时实际携带的 Cookie 范围同步登录态，并保留 Cookie 的域名、路径和同名项。
+1. скачать архив и распаковать в любую папку
+2. открыть `chrome://extensions/`
+3. включить режим разработчика
+4. нажать «Загрузить распакованное расширение» и выбрать папку с файлами
 
-4.  **连接权限**
-    首次保存配置时，浏览器会请求访问对应 Flow2API 服务地址。插件仅申请当前填写地址的访问权限，用于提交登录态。
+![Установка](image.png)
 
-    使用非本机 HTTP 地址时，扩展会提示 Google 登录 Cookie 和连接 Token 将通过明文网络传输。公网部署建议先配置 HTTPS；确认继续后，授权仅对当前填写的来源生效。
+![Расширение](image-1.png)
 
-## 三、 稳定性处理
+### настройка
 
-- 同一时间只执行一个同步任务，避免定时任务与手动测试重复提交。
-- 网络请求超时为 30 秒，遇到网络错误、限流或服务端临时错误时最多重试两次。
-- 日志最多保留 50 条，不记录连接 Token 或 Cookie 内容。
-- 弹窗和扩展图标会显示最近一次同步结果，便于及时发现登录态失效。
-- 仅上传浏览器访问 `flow.google.com/projects` 时实际匹配的 Cookie，不读取其他网站的 Cookie。
+1. открыть расширение
+2. указать адрес Flow2API, Connection Token и почту Google-аккаунта
+3. выставить интервал обновления, по умолчанию 60 минут
+4. сохранить настройки и нажать «Тестировать»
+
+![Настройки](image-2.png)
+
+Connection URL и Connection Token берутся из настроек Flow2API, в разделе подключения расширения.
+
+![Настройки Flow2API](image-3.png)
+
+перед синхронизацией нужно авторизоваться в Google и убедиться, что `https://flow.google.com/projects` нормально открывается.
+
+расширение использует текущий профиль Chrome. если аккаунтов несколько, для каждого лучше использовать отдельный профиль браузера с собственными настройками расширения.
+
+после успешной синхронизации аккаунт добавится или обновится в Flow2API. существующий аккаунт определяется по указанной почте.
+
+### нюансы
+
+- Chrome должен быть запущен для автоматической синхронизации
+- если Google полностью сбросит сессию, придётся авторизоваться заново
+- обновление cookies не гарантирует, что Google примет каждый запрос генерации
+- Cookie и Connection Token не записываются в журнал расширения
+- Connection Token хранится локально в браузере
+- для публичного VPS лучше использовать HTTPS, потому что через обычный HTTP куки и токен передаются без шифрования
+
+в целом на этом всё. один раз настроил, нажал «Тестировать», убедился, что аккаунт обновился, дальше расширение работает по заданному интервалу.
+
+---
+
+<a id="english"></a>
+
+# English
+
+a Chrome extension for automatically updating Google Cookies in [Flow2API](https://github.com/TheSmallHanCat/flow2api).
+
+the original extension collected cookies from browser storage and sent them as JSON. for some reason, that didn't work with my Flow2API installation. the server kept returning `Flow frontend bootstrap XSRF token is unavailable`.
+
+meanwhile, manually copying the `Cookie` header from F12 → Network worked perfectly fine. so I changed how cookies are collected. the extension now captures the actual `Cookie` header from requests to `flow.google.com` and sends it to the server in the same format.
+
+based on [Flow2API-Token-Updater](https://github.com/TheSmallHanCat/Flow2API-Token-Updater), with modified cookie extraction and a fully translated Russian interface.
+
+### features
+
+- automatic Google Cookie updates through the Flow2API API
+- captures the actual Cookie header from browser network requests
+- links updates to a Google account using its email
+- automatic synchronization every 60 minutes by default
+- manual synchronization for testing
+- event logs with errors and results
+- retries for temporary network errors
+- Russian interface
+
+### installation
+
+1. download and extract the archive
+2. open `chrome://extensions/`
+3. enable Developer mode
+4. click "Load unpacked" and select the extracted extension folder
+
+![Installation](image.png)
+
+![Extension](image-1.png)
+
+### configuration
+
+1. open the extension
+2. enter your Flow2API URL, Connection Token and Google account email
+3. set the synchronization interval, 60 minutes by default
+4. save the settings and click "Test"
+
+![Settings](image-2.png)
+
+you can find the Connection URL and Connection Token in your Flow2API settings, under the extension connection section.
+
+![Flow2API settings](image-3.png)
+
+make sure you're logged into Google and `https://flow.google.com/projects` opens correctly before synchronizing.
+
+the extension uses your current Chrome profile. if you have multiple Google accounts, it's better to use separate browser profiles with their own extension settings.
+
+after successful synchronization, the account will be added or updated in Flow2API. existing accounts are matched by email.
+
+### notes
+
+- Chrome must be running for scheduled synchronization
+- if Google invalidates your session, you'll need to log in again
+- updating cookies doesn't guarantee successful video or image generation
+- cookies and Connection Tokens are not written to extension logs
+- the Connection Token is stored locally in your browser
+- use HTTPS for public VPS deployments, since plain HTTP sends cookies and tokens without encryption
+
+that's pretty much it. configure the extension once, run a test, check that your account was updated and leave it to synchronize at the selected interval.
